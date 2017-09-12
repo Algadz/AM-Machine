@@ -1,5 +1,5 @@
 from unittest import TestCase  # import unittest
-from MasterGround import Rectangle  # import Rectangle from MasterGround
+from PostProcessor import Rectangle  # import Rectangle from MasterGround
 
 
 class TestRectangle(TestCase):  # define class TestRectangle
@@ -8,3 +8,4 @@ class TestRectangle(TestCase):  # define class TestRectangle
         r2 = Rectangle(2, 3.2)  # i
         self.assertEquals(r1.area(), 6)  # i
         self.assertEquals(r2.area(), 6.4)  # i
+
