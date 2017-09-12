@@ -42,10 +42,10 @@ def rotate_point(point, angle):  # return a point rotated of a given angle
     return rotated_point
 
 
-
 class Line:
     def __init__(self, text):
         self.text = text
+        self.blank = None
         self.g = None
         self.x = None
         self.y = None
@@ -59,58 +59,107 @@ class Line:
         self.ct = None
         self.et = None
 
+        self.get_gcode()
+
     def get_gcode(self):
+
+
+
+        """
+        This method scan the text parameter of the instance and assign values to parameters :
+            -g         None | 1 | 0
+            -x         None | positive | negative | int |  float
+            -y         None | positive | negative | int |  float
+            -z         None | positive | negative | int |  float
+            -e         None | positive | negative | int |  float
+            -f         None | positive | int |  float
+            -m         None | positive int                     Include optional S parameter | M108 S210 -> ["108","210"]
+            -comment   None | everything between # and EOL     Comments should be placed at end of line or solo
+        """
+
+        if self.text == "\n":
+            self.blank = True
+            return
+        else:
+            self.blank = False
+
         if len(re.findall("G([0|1])\s", self.text)) > 0:  # if G character exists assign its value, G2 not implemented
             self.g = re.findall("G([0|1])\s", self.text)[0]
 
         if self.g is not None:
-            if len(re.findall("X(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to x (+ - int and float accepted)
+            if len(re.findall("X(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to x (pos, neg, int, float accepted)
                 self.x = re.findall("X(\+?-?\d*\.?\d*)", self.text)[0]
 
-            if len(re.findall("Y(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to y (+ - int and float accepted)
+            if len(re.findall("Y(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to y (pos, neg, int, float accepted)
                 self.y = re.findall("Y(\+?-?\d*\.?\d*)", self.text)[0]
 
-            if len(re.findall("Z(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to z (+ - int and float accepted)
+            if len(re.findall("Z(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to z (pos, neg, int, float accepted)
                 self.z = re.findall("Z(\+?-?\d*\.?\d*)", self.text)[0]
 
-line = Line("#hello G1 X-0.53 Y548 Z0.3")
-line.get_gcode()
+        if len(re.findall("E(\+?-?\d*\.?\d*)", self.text)) > 0:      # assign value to e (pos, neg, int, float accepted)
+            self.e = re.findall("E(\+?-?\d*\.?\d*)", self.text)[0]
 
-print(line.g)
-print(line.x)
-print(line.y)
-print(line.z)
+        if len(re.findall("F(\+?\d*\.?\d*)", self.text)) > 0:        # assign value to e (pos, int, float accepted)
+            self.f = re.findall("F(\+?\d*\.?\d*)", self.text)[0]
 
-print("fin")
-sys.exit("End of test")
+        if len(re.findall("M(\d+)", self.text)) > 0:                 # assign value to e (pos, int, float accepted)
+            self.m = re.findall("M(\d+)\s?S?(\d+)?", self.text)[0]   # TODO: Check other param
 
-# TODO : Implémenter le code de reconnaissance de charactère pour G1 X Y etc.. qui vient ecrire dans les variables de l'instance de classe Line
+        if len(re.findall(";(.*)", self.text)) > 0:                  # Comments must be at the end of line or solo
+            self.comment = re.findall(";(.*)\\n", self.text)[0]
+
+
+"""
+    line = Line("G1 X-0.53 Y548 Z0.3 E0.265 M45 S3548 # commentaire de ouf 2215 \n")
+    line.get_gcode()
+    
+    print(line.g)
+    print(line.x)
+    print(line.y)
+    print(line.z)
+    print(line.e)
+    print(line.m)
+    print(line.comment)
+    print("fin")
+    sys.exit("End of test")
+"""
+
 
 class Gcode:
     def __init__(self, address):
         self.address = address
-        self.textLineList = [] # list of text from gcode
-        self.lineList=[] # list of Line instance
+        self.textLineList = []                                          # list of text from gcode
+        self.lineList = []                                               # list of Line instance
+        self.gLineRefList = []  # list of the reference of line containing G in the lineList
 
-    def get_textline_list(self): # get a list of line from gcode
-        # TODO : fonction qui donne une liste de ligne self.textLineList
+        self.get_text_line_list()
+        self.get_line_list()
 
-        self.textLineList = ["#je suis un commentaire", "G1 X0.254 Y2.245 Z0 E0 F1500"]
-        # TODO : STUB, à enlever une fois la fonction définie
+    def get_text_line_list(self):                                         # get a list of line from gcode
+        self.textLineList = open(self.address).readlines()
+        print(self.textLineList)
 
     def get_line_list(self):
         for x in self.textLineList:
-            self.lineList.append(Line(x)) # for each line in Gcode create a Line instance
+            self.lineList.append(Line(x))  # for each line in Gcode create a Line instance
 
     def get_c_axis(self):
-        # TODO : get the two consecutive line where .point is not None
+        # TODO : get the two consecutive line including a movement G0 or G1
         # TODO : calculate the angle between the vector and the tool
         # TODO : write C axis in endpoint
+        # peut etre faire un liste des lignes ayant g not true, puis on parcours cette liste 2 à 2 -> ok
+
+        i = 0
+        for x in self.lineList:
+            if x.g is not None:
+                self.gLineRefList.append(i)
+
+
         first_line = None
         second_line = None
         i = 0
         while i < len(self.lineList):
-            if self.lineList[i].point is not None:
+            if self.lineList[i].g is not None:
                 first_line = i
             else :
                 i += 1
@@ -118,15 +167,17 @@ class Gcode:
         while i < len(self.lineList):
             if self.lineList[i] is not None:
                 second_line = i
-            else :
+            else:
                 i += 1
 
         print (first_line)
         print (second_line)
 
 
-
-
+gcode = Gcode("test.gcode")
+gcode.get_line_list()
+print(gcode.lineList[13].x)
+sys.exit("End of test")
 
 
 
