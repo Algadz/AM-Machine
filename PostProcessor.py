@@ -1,7 +1,7 @@
 import math
 import matplotlib.pyplot as plt
 import sys
-import re
+import regex
 
 radianToDegree = (360 / (2 * math.pi))
 toolVector = [1, 0]  # Orientation of the tool
@@ -49,6 +49,7 @@ class Line:
         self.g = None
         self.x = None
         self.y = None
+        self.point = None
         self.z = None
         self.e = None
         self.f = None
@@ -60,6 +61,9 @@ class Line:
         self.et = None
 
         self.get_gcode()
+
+    def __str__(self):
+        return "G%s X%s Y%s Z%s C%s E%s F%s ;%s" % (self.g,self.x,self.y,self.z,self.ct,self.e,self.f,self.comment)
 
     def get_gcode(self):
 
@@ -75,54 +79,43 @@ class Line:
             -f         None | positive | int |  float
             -m         None | positive int                     Include optional S parameter | M108 S210 -> ["108","210"]
             -comment   None | everything between # and EOL     Comments should be placed at end of line or solo
-        """
 
+            Gcode command must be written uppercase
+        """
+        # TODO : ne fait pas la différence si la lettre est dans un commentaire ou non
         if self.text == "\n":
             self.blank = True
             return
         else:
             self.blank = False
 
-        if len(re.findall("G([0|1])\s", self.text)) > 0:  # if G character exists assign its value, G2 not implemented
-            self.g = re.findall("G([0|1])\s", self.text)[0]
+        if len(regex.findall("(?<!;.*)G([0|1])\s", self.text)) > 0:  # if G character exists assign its value, G2 not implemented
+            self.g = regex.findall("(?<!;.*)G([0|1])\s", self.text)[0]
 
         if self.g is not None:
-            if len(re.findall("X(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to x (pos, neg, int, float accepted)
-                self.x = re.findall("X(\+?-?\d*\.?\d*)", self.text)[0]
+            if len(regex.findall("(?<!;.*)X(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to x (pos, neg, int, float accepted)
+                self.x = float(regex.findall("(?<!;.*)X(\+?-?\d*\.?\d*)", self.text)[0])
 
-            if len(re.findall("Y(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to y (pos, neg, int, float accepted)
-                self.y = re.findall("Y(\+?-?\d*\.?\d*)", self.text)[0]
+            if len(regex.findall("(?<!;.*)Y(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to y (pos, neg, int, float accepted)
+                self.y = float(regex.findall("(?<!;.*)Y(\+?-?\d*\.?\d*)", self.text)[0])
 
-            if len(re.findall("Z(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to z (pos, neg, int, float accepted)
-                self.z = re.findall("Z(\+?-?\d*\.?\d*)", self.text)[0]
+            self.point = [self.x, self.y]
 
-        if len(re.findall("E(\+?-?\d*\.?\d*)", self.text)) > 0:      # assign value to e (pos, neg, int, float accepted)
-            self.e = re.findall("E(\+?-?\d*\.?\d*)", self.text)[0]
+            if len(regex.findall("(?<!;.*)Z(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to z (pos, neg, int, float accepted)
+                self.z = float(regex.findall("(?<!;.*)Z(\+?-?\d*\.?\d*)", self.text)[0])
 
-        if len(re.findall("F(\+?\d*\.?\d*)", self.text)) > 0:        # assign value to e (pos, int, float accepted)
-            self.f = re.findall("F(\+?\d*\.?\d*)", self.text)[0]
-
-        if len(re.findall("M(\d+)", self.text)) > 0:                 # assign value to e (pos, int, float accepted)
-            self.m = re.findall("M(\d+)\s?S?(\d+)?", self.text)[0]   # TODO: Check other param
-
-        if len(re.findall(";(.*)", self.text)) > 0:                  # Comments must be at the end of line or solo
-            self.comment = re.findall(";(.*)\\n", self.text)[0]
+        if len(regex.findall("(?<!;.*)E(\+?-?\d*\.?\d*)", self.text)) > 0:      # assign value to e (pos, neg, int, float accepted)
+            self.e = float(regex.findall("(?<!;.*)E(\+?-?\d*\.?\d*)", self.text)[0])
 
 
-"""
-    line = Line("G1 X-0.53 Y548 Z0.3 E0.265 M45 S3548 # commentaire de ouf 2215 \n")
-    line.get_gcode()
-    
-    print(line.g)
-    print(line.x)
-    print(line.y)
-    print(line.z)
-    print(line.e)
-    print(line.m)
-    print(line.comment)
-    print("fin")
-    sys.exit("End of test")
-"""
+        if len(regex.findall("(?<!;.*)F(\+?\d*\.?\d*)", self.text)) > 0:        # assign value to e (pos, int, float accepted)
+            self.f = regex.findall("(?<!;.*)F(\+?\d*\.?\d*)", self.text)[0]
+
+        if len(regex.findall("(?<!;.*)M(\d+)", self.text)) > 0:                 # assign value to e (pos, int, float accepted)
+            self.m = regex.findall("(?<!;.*)M(\d+)\s?S?(\d+)?", self.text)[0]   # TODO: Check other param
+
+        if len(regex.findall(";(.*)", self.text)) > 0:                  # Comments must be at the end of line or solo
+            self.comment = regex.findall(";(.*)\\n", self.text)[0]
 
 
 class Gcode:
@@ -140,43 +133,175 @@ class Gcode:
         print(self.textLineList)
 
     def get_line_list(self):
-        for x in self.textLineList:
-            self.lineList.append(Line(x))  # for each line in Gcode create a Line instance
+        for element in self.textLineList:
+            self.lineList.append(Line(element))  # for each line in Gcode create a Line instance
+
+    def interpolate(self, max_length):
+        """
+        Method to interpolate G1 movement when exceeding input parameter "max_length"
+        Strategy :
+        browse g1 line dans le sens normal
+            get actual position
+                if magnitude(previous position, actual position) > max_length :
+                    append @list of Line after actual point the barycenter of the two point
+                        Characteristic of point : G Point(X,Y)
+
+            previous position = actual position
+
+        """
+        counter = 0
+        last_e = 0
+        while counter < len(self.gLineRefList)-1:
+            actual_pos = self.lineList[self.gLineRefList[counter]]                    # define actual position
+            next_pos = self.lineList[self.gLineRefList[counter + 1]]                  # define next position
+            magnitude = get_magnitude(get_vector(actual_pos.point, next_pos.point))   # define movement length
+            if magnitude > max_length:
+
+                g = actual_pos.g
+                x = (next_pos.x - actual_pos.x) / 2 + actual_pos.x
+                y = (next_pos.y - actual_pos.y) / 2 + actual_pos.y
+                if actual_pos.e is not None:
+                    last_e = actual_pos.e
+                if next_pos.e is not None:
+                    e = (next_pos.e - last_e) / 2 + last_e
+                    self.lineList.insert(self.gLineRefList[counter + 1], Line("G%s X%s Y%s E%s \n" % (g, x, y, e)))
+
+                else:
+                    self.lineList.insert(self.gLineRefList[counter + 1], Line("G%s X%s Y%s \n" % (g, x, y)))
+
+            else:
+                counter += 1
+            self.get_g_command_ref()
+
+    def get_g_command_ref(self):
+        counter = 0
+        self.gLineRefList=[]
+        for line in self.lineList:   # Get list of line reference containing a G movement
+            if line.g is not None:
+                self.gLineRefList.append(counter)
+                counter += 1
+            else:
+                counter += 1
 
     def get_c_axis(self):
-        # TODO : get the two consecutive line including a movement G0 or G1
-        # TODO : calculate the angle between the vector and the tool
-        # TODO : write C axis in endpoint
-        # peut etre faire un liste des lignes ayant g not true, puis on parcours cette liste 2 à 2 -> ok
+        """
+        Method to calculate the value of the C axis for each G0/G1 command
+        """
 
-        i = 0
-        for x in self.lineList:
-            if x.g is not None:
-                self.gLineRefList.append(i)
+        counter = 0
+        while counter < len(self.gLineRefList)-1:     # -1 because len([1,2,3])=3
+
+            start_point = self.lineList[self.gLineRefList[counter]]
+            end_point = self.lineList[self.gLineRefList[counter + 1]]
+
+            end_point.ct = get_angle(get_vector(start_point.point, end_point.point), toolVector) * 180 / math.pi  # calculation of ct
+            end_point.ct = round(end_point.ct, 3)
+            counter += 1
+
+        # the following line apply c axis for G0 command
+
+    def correct_c_for_g0(self):
+        """
+        Method to correct the values of the C axis for G0 commands
+        Each G0 command has the C axis value of the next G1 command
+        """
+
+        counter = len(self.gLineRefList) - 1
+        variable = None
+
+        while counter != -1:
+            if self.lineList[self.gLineRefList[counter]].g is "1":
+                variable = self.lineList[self.gLineRefList[counter]].ct
+            if self.lineList[self.gLineRefList[counter]].g is "0":
+                self.lineList[self.gLineRefList[counter]].ct = variable
+            counter -= 1
+
+    def clean_c_axis(self):
+
+        counter = 1         # no angle for first element
+
+        while counter < len(self.gLineRefList)-1:     # -1 because len([1,2,3])=3
+
+            angle1 = self.lineList[self.gLineRefList[counter]].ct
+            angle2 = self.lineList[self.gLineRefList[counter+1]].ct
+            angle2 = angle2 - round((angle2 - angle1)/360)*360
+            self.lineList[self.gLineRefList[counter+1]].ct = angle2
+            counter += 1
+
+    def transform_xy(self):
+        """
+        To be executed after C calculation
+        Method returning values for xt and yt to correct rotation
+
+        Strategy :
+        parcourir la liste des points g
+        retrancher au point le vecteur entre la position modifiée et la position d'origine
+
+        """
+        self.get_g_command_ref()
+        counter = 0
+
+        while counter < len(self.gLineRefList)-1:
+            actual_point = self.lineList[self.gLineRefList[counter]]
+            transformed_point = get_vector(rotate_point(actual_point.point, actual_point.ct*math.pi/180), [0, 0])
+            actual_point.xt = -round(transformed_point[0], 3)
+            actual_point.yt = -round(transformed_point[1], 3)
+            counter += 1
+
+    def print_gcode(self):
+        for line in self.lineList:
+            text = ""
+            if line.g is not None:
+                text += "G%s " % line.g
+            if line.x is not None:
+                text += "X%s " % line.xt
+            if line.y is not None:
+                text += "Y%s " % line.yt
+            if line.z is not None:
+                text += "Z%s " % line.z
+            if line.ct is not None:
+                text += "C%s " % (line.ct*-1)
+            if line.e is not None:
+                text += "E%s " % line.e
+            if line.comment is not None:
+                text += ";%s" % line.comment
+            print(text)
+
+    def graph_gcode(self):
+        self.get_g_command_ref()
+        counter = 0
+        x_list = []
+        y_list = []
+        while counter < len(self.gLineRefList):
+            point = self.lineList[self.gLineRefList[counter]]
+            x_list.append(point.x)
+            y_list.append(point.y)
+            counter += 1
+
+        plt.scatter(x_list, y_list, s=100)
+        plt.title('Gcode')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.savefig('gcode.png')
+        plt.show()
 
 
-        first_line = None
-        second_line = None
-        i = 0
-        while i < len(self.lineList):
-            if self.lineList[i].g is not None:
-                first_line = i
-            else :
-                i += 1
-        i += 1
-        while i < len(self.lineList):
-            if self.lineList[i] is not None:
-                second_line = i
-            else:
-                i += 1
-
-        print (first_line)
-        print (second_line)
-
+# todo : modified xt yt
+# todo : adjust feedrate after modification
+# todo : interpolate non lineaire pour C
+# todo : interpoler après le calcul du C en mesurant l'erreur !
 
 gcode = Gcode("test.gcode")
-gcode.get_line_list()
-print(gcode.lineList[13].x)
+gcode.get_g_command_ref()
+gcode.graph_gcode()
+#gcode.interpolate(5)
+
+gcode.get_c_axis()
+gcode.clean_c_axis()
+gcode.correct_c_for_g0()
+gcode.transform_xy()
+gcode.print_gcode()
+gcode.graph_gcode()
 sys.exit("End of test")
 
 
