@@ -2,6 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import sys
 import regex
+import time
 
 radianToDegree = (360 / (2 * math.pi))
 toolVector = [1, 0]  # Orientation of the tool
@@ -83,7 +84,7 @@ class Line:
 
             Gcode command must be written uppercase
         """
-        # TODO : implementer G92 G91 G90 M82
+
         if self.text == "\n":
             self.blank = True
             return
@@ -92,7 +93,7 @@ class Line:
 
         if len(regex.findall("(?<!;.*)G(0|1|3|92|90|91)\s", self.text)) > 0:  # if G character exists assign its value, G2 not implemented
             self.g = regex.findall("(?<!;.*)G(0|1|3|92|90|91)\s", self.text)[0]
-            print(self.text," -- g", self.g)
+
         if self.g in ["0", "1", "92"]:
             if len(regex.findall("(?<!;.*)X(\+?-?\d*\.?\d*)", self.text)) > 0:  # assign value to x (pos, neg, int, float accepted)
                 self.x = float(regex.findall("(?<!;.*)X(\+?-?\d*\.?\d*)", self.text)[0])
@@ -123,6 +124,7 @@ class Line:
 
 # todo : prendre en compte les deplacement nuls  /0 ds magnitude
 # todo : prendre en compte les commandes G sans X ou Y
+# todo : ajouter les feedrates
 
 class Gcode:
     def __init__(self, address):
@@ -142,42 +144,7 @@ class Gcode:
         for element in self.textLineList:
             self.lineList.append(Line(element))  # for each line in Gcode create a Line instance
 
-    def interpolate(self, max_length):
-        """
-        Method to interpolate G1 movement when exceeding input parameter "max_length"
-        Strategy :
-        browse g1 line dans le sens normal
-            get actual position
-                if magnitude(previous position, actual position) > max_length :
-                    append @list of Line after actual point the barycenter of the two point
-                        Characteristic of point : G Point(X,Y)
 
-            previous position = actual position
-
-        """
-        counter = 0
-        last_e = 0
-        while counter < len(self.gLineRefList)-1:
-            actual_pos = self.lineList[self.gLineRefList[counter]]                    # define actual position
-            next_pos = self.lineList[self.gLineRefList[counter + 1]]                  # define next position
-            magnitude = get_magnitude(get_vector(actual_pos.point, next_pos.point))   # define movement length
-            if magnitude > max_length:
-
-                g = actual_pos.g
-                x = (next_pos.x - actual_pos.x) / 2 + actual_pos.x
-                y = (next_pos.y - actual_pos.y) / 2 + actual_pos.y
-                if actual_pos.e is not None:
-                    last_e = actual_pos.e
-                if next_pos.e is not None:
-                    e = (next_pos.e - last_e) / 2 + last_e
-                    self.lineList.insert(self.gLineRefList[counter + 1], Line("G%s X%s Y%s E%s \n" % (g, x, y, e)))
-
-                else:
-                    self.lineList.insert(self.gLineRefList[counter + 1], Line("G%s X%s Y%s \n" % (g, x, y)))
-
-            else:
-                counter += 1
-            self.get_g_command_ref()
 
     def transform_xy(self):
 
@@ -197,7 +164,7 @@ class Gcode:
         counter = 0
         self.gLineRefList = []
         for line in self.lineList:   # Get list of line reference containing a G movement
-            if line.g in ["1", "0"]:
+            if line.g in ["1", "0"] and line.x is not None and line.y is not None:
                 self.gLineRefList.append(counter)
                 counter += 1
             else:
@@ -214,7 +181,7 @@ class Gcode:
 
             start_point = self.lineList[self.gLineRefList[counter]]
             end_point = self.lineList[self.gLineRefList[counter + 1]]
-
+            print(start_point.text)
             if start_point.x == end_point.x and start_point.y == end_point.y:   # todo : Dégueulasse , problème lorsque point double
                 start_point.point[0] += 0.001
 
@@ -245,7 +212,7 @@ class Gcode:
     def transform_pos(self, line, angle):
         transformed_pos = get_vector([0, 0], rotate_point(line.point, angle * math.pi / 180))
 
-        line.xt = round(transformed_pos[0], 3)
+        line.xt = round(transformed_pos[0], 3)  # limit command length
         line.yt = round(transformed_pos[1], 3)
 
     def transform_xy(self):
@@ -262,13 +229,13 @@ class Gcode:
 
     def improve_trajectory(self, max_angle):
 
-    # pour chaque g1 point append ce meme point transformé par c-1
+    # pour chaque g1 point append ce meme point en G0 transformé par c-1
+
         self.get_g_command_ref()
 
         counter = len(self.gLineRefList)-1
         while counter != 1:
             if self.lineList[self.gLineRefList[counter]].g == "1":
-
                 actual_point = self.lineList[self.gLineRefList[counter]]
 
                 prev_point = self.lineList[self.gLineRefList[counter-1]]
@@ -282,11 +249,56 @@ class Gcode:
                     self.lineList.insert(self.gLineRefList[counter], new_point)
 
                     counter -= 1
+
                 else:
-                    counter -=1
+                    counter -= 1
 
             else:
                 counter -= 1
+
+    def interpolate(self, max_angle):
+        """
+        parcourir les G
+        Si la différence d'angle entre le point actuel et le point suivant est supérieur à Cmax
+        append un nouveau point en counter + 1 qui à :
+            C = C1 + C2 / 2
+            Xt Yt = rotation de -C du point 1 non transformé
+        """
+        counter = 0
+        self.get_g_command_ref()
+
+        while counter < len(self.gLineRefList)-1:
+
+            actual_pos = self.lineList[self.gLineRefList[counter]]                    # define actual position
+            next_pos = self.lineList[self.gLineRefList[counter + 1]]                  # define next position
+            if counter % 100 == 0:
+                print((1-(len(self.gLineRefList)-counter)/len(self.gLineRefList))*100," %")
+            if abs(actual_pos.ct - next_pos.ct) > max_angle:
+
+                c = (actual_pos.ct + next_pos.ct)/2
+
+                x = actual_pos.x
+                y = actual_pos.y
+                point_t = get_vector([0, 0], rotate_point([x, y], c * math.pi / 180))
+                xt = point_t[0]
+                yt = point_t[1]
+
+                self.lineList.insert(self.gLineRefList[counter + 1], Line("G0 X%s Y%s\n" % (x, y)))
+                self.lineList[self.gLineRefList[counter + 1]].xt = round(xt, 3)
+                self.lineList[self.gLineRefList[counter + 1]].yt = round(yt, 3)
+                self.lineList[self.gLineRefList[counter + 1]].ct = c
+
+            else:
+                counter += 1
+            #insérer à gLineRefList à la position counter+1 la valeur glineRefList[counter+1]-1
+            # incrémenter de 1 toute les valeurs suivantes à counter + 1
+
+            #self.gLineRefList.insert(counter + 1, self.gLineRefList[counter + 1]-1)
+            #i = counter
+            #while i < len(self.gLineRefList):
+                #self.gLineRefList[i] += 1
+                #i += 1
+            self.get_g_command_ref()
 
     def print_gcode(self):
         for line in self.lineList:
@@ -294,15 +306,17 @@ class Gcode:
             if line.g is not None:
                 text += "G%s " % line.g
             if line.x is not None:
-                text += "X%s " % line.xt
+                text += "X%s " % (round(line.xt, 3))
             if line.y is not None:
-                text += "Y%s " % line.yt
+                text += "Y%s " % (round(line.yt, 3))
             if line.z is not None:
-                text += "Z%s " % line.z
+                text += "Z%s " % (round(line.z, 3))
             if line.ct is not None:
-                text += "U%s " % (line.ct*-1)
+                text += "U%s " % (round((line.ct*-1), 3))
             if line.e is not None:
-                text += "E%s " % line.e
+                text += "E%s " % (round(line.e, 3))
+            if line.f is not None:
+                text += "F%s " % (round(line.f, 3))
             if line.m is not None:
                 if line.m[0] is not "":
                     text += "M%s " % line.m[0]
@@ -335,8 +349,8 @@ class Gcode:
 
 # todo : modified xt yt
 # todo : adjust feedrate after modification
-# todo : interpolate non lineaire pour C
-# todo : interpoler après le calcul du C en mesurant l'erreur !
+# TODO : mouvement parasites de rotation entre G0
+# todo : bug si le fichier ne termine pas par une ligne vide ? ou un G1 ?
 
 gcode = Gcode("test.gcode")
 gcode.get_g_command_ref()
@@ -345,187 +359,12 @@ gcode.get_c_axis()
 gcode.clean_c_axis()
 gcode.transform_xy()
 gcode.improve_trajectory(25)
-
+gcode.interpolate(25)
 open('4axis.gcode', 'w').close()
 f = open('4axis.gcode', 'a')
 gcode.print_gcode()
 f.close()
 
+print(get_vector([0, 0], rotate_point([-50, 50], 315 * math.pi / 180)))
+
 sys.exit("End of test")
-
-
-
-
-###definition des listes
-O=[]
-V=[]
-MVMT=[]
-
-### Calcul des rotations 0
-### 0[i] correspond à l'angle entre le vecteur P[i+1]P[i+2] et u
-
-i=0
-while i < len(gcodeList):
-    O.append(get_angle(get_vector(gcodeList[i + 1], gcodeList[i + 2]), toolVector))
-    i=i+1
-O.append(O[len(O)-1])
-print(O)
-
-### modification des angles 0 pour prendre en compte la 2pi periodicité
-
-i = 0
-while i < len(O):
-
-    while abs(O[i - 1] - O[i]) > math.pi and O[i]>O[i-1]:
-        O[i] = O[i] - 2 * math.pi
-
-
-    while abs(O[i - 1] - O[i]) > math.pi and O[i]<O[i-1]:
-        O[i] = O[i] + 2 * math.pi
-
-    i = i + 1
-
-print(O)
-
-
-### Calcul des déplacements correctifs aux rotations
-### V[i] correspont au vecteur correctif associé à la rotation O[i] du point P[i+1]
-
-i=0
-while i<len(gcodeList)-1:
-    V.append(get_vector(rotate_point(gcodeList[i + 1], O[i]), [0, 0]))
-    i=i+1
-"print(V)"
-
-
-
-### Ecriture des position XYC absolue successives
-
-
-i=0
-while i<len(gcodeList)-1:
-    X=V[i][0]
-    Y=V[i][1]
-    C=O[i]
-    MVMT.append([X,Y,C])
-    i=i+1
-
-
-
-
-### ecriture des position X et y et C successives pour représentation
-AxeX=[]
-AxeY=[]
-
-AxeXt=[]
-AxeYt=[]
-AxeCt=[]
-i=0
-while i<len(MVMT):
-    AxeX.append(gcodeList[i][0])
-    AxeY.append(gcodeList[i][1])
-
-
-    AxeXt.append(MVMT[i][0])
-    AxeYt.append(MVMT[i][1])
-    AxeCt.append(MVMT[i][2])
-    i=i+1
-
-plt.scatter(AxeX,AxeY,s=100)
-plt.title('Nuage de points')
-plt.xlabel('x')
-plt.ylabel('y')
-plt.savefig('cercle.png')
-plt.show()
-
-plt.scatter(AxeXt,AxeYt,s=100)
-plt.title('Nuage de points')
-plt.xlabel('x')
-plt.ylabel('y')
-plt.savefig('cercle2.png')
-plt.show()
-
-#### fin de l'impression
-
-### Calcul des vitesses vrai des axes X Y
-vitXY=[]
-vitC=[]
-i=0
-while i<len(MVMT)-1:
-    vitXY.append((get_magnitude(get_vector(MVMT[i], MVMT[i + 1])) / (get_magnitude(get_vector(gcodeList[i + 1], gcodeList[i])))) * feedrate)
-    print("norme nouveaux", (get_magnitude(get_vector(MVMT[i], MVMT[i + 1]))))
-    print("norme origine", get_magnitude(get_vector(gcodeList[i + 1], gcodeList[i])))
-    print("feedrate", i, vitXY[i])
-    i=i+1
-
-print(("--------"))
-"""i=0
-while i<len(MVMT):
-    print(MVMT[i])
-    i=i+1"""
-print(("--------"))
-"""print((vitXY))
-print(max(vitXY))"""
-
-
-
-i=0
-I=[]
-while i<len(O):
-    I.append(i)
-    i=i+1
-
-
-
-plt.scatter(I,O,s=100)
-plt.title('Nuage de points')
-plt.xlabel('I')
-plt.ylabel('Angles O')
-plt.savefig('cercle2.png')
-plt.show()
-
-print (len(MVMT), "len(MVMT)")
-print (len(vitXY), "len(vitXY)")
-
-### Impression du code G dans un fichier texte
-fichier = open("cercle-15-10-4.gcode", "w")
-fichier.write("G1 X0 Y0 U0")
-fichier.write("\n")
-
-i=0
-while i==0:
-
-    fichier.write("G1 X")
-    fichier.write(str(int(MVMT[i][0]*1000)/1000))
-    fichier.write(" Y")
-    fichier.write(str(int(MVMT[i][1]*1000)/1000))
-    fichier.write(" U")
-    fichier.write(str(-(int(MVMT[i][2] * 1000 * radianToDegree) / 1000)))
-    fichier.write(" F")
-    fichier.write(str((int(5000*1000)/1000)))
-    fichier.write("\n")
-    fichier.write("M106 P0 S1")
-    fichier.write("\n")
-    fichier.write("G4 P100")
-    fichier.write("\n")
-    i=i+1
-while i<len(MVMT):
-
-    fichier.write("G1 X")
-    fichier.write(str(int(MVMT[i][0]*1000)/1000))
-    fichier.write(" Y")
-    fichier.write(str(int(MVMT[i][1]*1000)/1000))
-    fichier.write(" U")
-    fichier.write(str(-(int(MVMT[i][2] * 1000 * radianToDegree) / 1000)))
-    fichier.write(" F")
-    fichier.write(str((int(vitXY[i-1]*1000)/1000)))
-    fichier.write("\n")
-    i=i+1
-fichier.write("M106 P0 S0")
-fichier.write("\n")
-fichier.write("G4 P100")
-fichier.write("\n")
-fichier.write("G1 X0 Y0 U0 F5000")
-fichier.write("\n")
-
-fichier.close()
